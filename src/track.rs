@@ -1,9 +1,10 @@
 use std::fmt;
 use std::sync::Arc;
+use futures::executor::block_on;
 
 use chrono::{DateTime, Utc};
-use rspotify::spotify::model::album::FullAlbum;
-use rspotify::spotify::model::track::{FullTrack, SavedTrack, SimplifiedTrack};
+use rspotify::model::album::FullAlbum;
+use rspotify::model::track::{FullTrack, SavedTrack, SimplifiedTrack};
 
 use crate::album::Album;
 use crate::artist::Artist;
@@ -211,7 +212,7 @@ impl ListItem for Track {
         let spotify = queue.get_spotify();
 
         match self.album_id {
-            Some(ref album_id) => spotify.album(&album_id).map(|ref fa| fa.into()),
+            Some(ref album_id) => block_on(spotify.album(&album_id)).map(|ref fa| fa.into()),
             None => None,
         }
     }

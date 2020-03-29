@@ -1,7 +1,8 @@
 use std::iter::Iterator;
 use std::sync::Arc;
+use futures::executor::block_on;
 
-use rspotify::spotify::model::playlist::{FullPlaylist, SimplifiedPlaylist};
+use rspotify::model::playlist::{FullPlaylist, SimplifiedPlaylist};
 
 use crate::library::Library;
 use crate::queue::Queue;
@@ -28,10 +29,12 @@ impl Playlist {
 
         let mut collected_tracks = Vec::new();
 
-        let mut tracks_result = spotify.user_playlist_tracks(&self.id, 100, 0);
+        let mut tracks_result = block_on(spotify.user_playlist_tracks(&self.id, 100, 0));
         while let Some(ref tracks) = tracks_result.clone() {
             for listtrack in &tracks.items {
-                collected_tracks.push((&listtrack.track).into());
+                if let Some(ref track) = listtrack.track {
+                    collected_tracks.push((track).into());
+                }
             }
             debug!("got {} tracks", tracks.items.len());
 
@@ -39,11 +42,11 @@ impl Playlist {
             tracks_result = match tracks.next {
                 Some(_) => {
                     debug!("requesting tracks again..");
-                    spotify.user_playlist_tracks(
+                    block_on(spotify.user_playlist_tracks(
                         &self.id,
                         100,
                         tracks.offset + tracks.items.len() as u32,
-                    )
+                    ))
                 }
                 None => None,
             }

@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::ops::Deref;
@@ -5,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::thread;
 
-use rspotify::spotify::model::playlist::SimplifiedPlaylist;
+use rspotify::model::playlist::SimplifiedPlaylist;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -37,7 +38,7 @@ pub struct Library {
 
 impl Library {
     pub fn new(ev: &EventManager, spotify: Arc<Spotify>, use_nerdfont: bool) -> Self {
-        let user_id = spotify.current_user().map(|u| u.id);
+        let user_id = block_on(spotify.current_user()).map(|u| u.id);
 
         let library = Self {
             tracks: Arc::new(RwLock::new(Vec::new())),
@@ -130,7 +131,7 @@ impl Library {
         };
 
         if let Some(position) = pos {
-            if self.spotify.delete_playlist(id) {
+            if block_on(self.spotify.delete_playlist(id)) {
                 {
                     let mut store = self.playlists.write().expect("can't writelock playlists");
                     store.remove(position);
@@ -150,7 +151,7 @@ impl Library {
 
     pub fn save_playlist(&self, name: &str, tracks: &[Track]) {
         debug!("saving {} tracks to new list {}", tracks.len(), name);
-        match self.spotify.create_playlist(name, None, None) {
+        match block_on(self.spotify.create_playlist(name, None, None)) {
             Some(id) => self.overwrite_playlist(&id, &tracks),
             None => error!("could not create new playlist.."),
         }
@@ -223,7 +224,7 @@ impl Library {
         let mut stale_lists = self.playlists.read().unwrap().clone();
         let mut list_order = Vec::new();
 
-        let mut lists_result = self.spotify.current_user_playlist(50, 0);
+        let mut lists_result = block_on(self.spotify.current_user_playlist(50, 0));
         while let Some(ref lists) = lists_result.clone() {
             for (index, remote) in lists.items.iter().enumerate() {
                 list_order.push(remote.id.clone());
@@ -247,8 +248,8 @@ impl Library {
             lists_result = match lists.next {
                 Some(_) => {
                     debug!("requesting playlists again..");
-                    self.spotify
-                        .current_user_playlist(50, lists.offset + lists.items.len() as u32)
+                    block_on(self.spotify
+                        .current_user_playlist(50, lists.offset + lists.items.len() as u32))
                 }
                 None => None,
             }
@@ -286,7 +287,7 @@ impl Library {
         let mut i: u32 = 0;
 
         loop {
-            let page = self.spotify.current_user_followed_artists(last);
+            let page = block_on(self.spotify.current_user_followed_artists(last));
             debug!("artists page: {}", i);
             i += 1;
             if page.is_none() {
@@ -338,7 +339,7 @@ impl Library {
         let mut i: u32 = 0;
 
         loop {
-            let page = self.spotify.current_user_saved_albums(albums.len() as u32);
+            let page = block_on(self.spotify.current_user_saved_albums(albums.len() as u32));
             debug!("albums page: {}", i);
             i += 1;
             if page.is_none() {
@@ -384,7 +385,7 @@ impl Library {
         let mut i: u32 = 0;
 
         loop {
-            let page = self.spotify.current_user_saved_tracks(tracks.len() as u32);
+            let page = block_on(self.spotify.current_user_saved_tracks(tracks.len() as u32));
 
             debug!("tracks page: {}", i);
             i += 1;
@@ -497,7 +498,7 @@ impl Library {
 
         let mut has_modified = false;
 
-        if self.spotify.append_tracks(playlist_id, &track_ids, None) {
+        if block_on(self.spotify.append_tracks(playlist_id, &track_ids, None)) {
             let mut playlists = self.playlists.write().expect("can't writelock playlists");
             if let Some(playlist) = playlists.iter_mut().find(|p| p.id == playlist_id) {
                 if let Some(tracks) = &mut playlist.tracks {
@@ -527,16 +528,16 @@ impl Library {
         }
 
         if api
-            && self
-                .spotify
-                .current_user_saved_tracks_add(
+            && block_on(
+                self.spotify.current_user_saved_tracks_add(
                     tracks
                         .iter()
                         .filter(|t| t.id.is_some())
                         .map(|t| t.id.clone().unwrap())
                         .collect(),
-                )
-                .is_none()
+                ),
+            )
+            .is_none()
         {
             return;
         }
@@ -566,16 +567,16 @@ impl Library {
         }
 
         if api
-            && self
-                .spotify
-                .current_user_saved_tracks_delete(
+            && block_on(
+                self.spotify.current_user_saved_tracks_delete(
                     tracks
                         .iter()
                         .filter(|t| t.id.is_some())
                         .map(|t| t.id.clone().unwrap())
                         .collect(),
-                )
-                .is_none()
+                ),
+            )
+            .is_none()
         {
             return;
         }
@@ -610,10 +611,11 @@ impl Library {
         }
 
         if let Some(ref album_id) = album.id {
-            if self
-                .spotify
-                .current_user_saved_albums_add(vec![album_id.clone()])
-                .is_none()
+            if block_on(
+                self.spotify
+                    .current_user_saved_albums_add(vec![album_id.clone()]),
+            )
+            .is_none()
             {
                 return;
             }
@@ -641,10 +643,11 @@ impl Library {
         }
 
         if let Some(ref album_id) = album.id {
-            if self
-                .spotify
-                .current_user_saved_albums_delete(vec![album_id.clone()])
-                .is_none()
+            if block_on(
+                self.spotify
+                    .current_user_saved_albums_delete(vec![album_id.clone()]),
+            )
+            .is_none()
             {
                 return;
             }
@@ -679,11 +682,7 @@ impl Library {
         }
 
         if let Some(ref artist_id) = artist.id {
-            if self
-                .spotify
-                .user_follow_artists(vec![artist_id.clone()])
-                .is_none()
-            {
+            if block_on(self.spotify.user_follow_artists(vec![artist_id.clone()])).is_none() {
                 return;
             }
         }
@@ -710,11 +709,7 @@ impl Library {
         }
 
         if let Some(ref artist_id) = artist.id {
-            if self
-                .spotify
-                .user_unfollow_artists(vec![artist_id.clone()])
-                .is_none()
-            {
+            if block_on(self.spotify.user_unfollow_artists(vec![artist_id.clone()])).is_none() {
                 return;
             }
         }
@@ -752,10 +747,11 @@ impl Library {
             return;
         }
 
-        if self
-            .spotify
-            .user_playlist_follow_playlist(playlist.owner_id.clone(), playlist.id.clone())
-            .is_none()
+        if block_on(
+            self.spotify
+                .user_playlist_follow_playlist(playlist.owner_id.clone(), playlist.id.clone()),
+        )
+        .is_none()
         {
             return;
         }

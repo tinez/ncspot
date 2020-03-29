@@ -1,8 +1,9 @@
+use futures::executor::block_on;
 use std::fmt;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use rspotify::spotify::model::album::{FullAlbum, SavedAlbum, SimplifiedAlbum};
+use rspotify::model::album::{FullAlbum, SavedAlbum, SimplifiedAlbum};
 
 use crate::artist::Artist;
 use crate::library::Library;
@@ -32,7 +33,7 @@ impl Album {
         }
 
         if let Some(ref album_id) = self.id {
-            if let Some(fa) = spotify.full_album(&album_id) {
+            if let Some(fa) = block_on(spotify.full_album(&album_id)) {
                 self.tracks = Some(
                     fa.tracks
                         .items

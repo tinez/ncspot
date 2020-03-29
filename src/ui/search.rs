@@ -8,6 +8,7 @@ use cursive::views::{EditView, NamedView, ViewRef};
 use cursive::{Cursive, Printer, Vec2};
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, RwLock};
+use futures::executor::block_on;
 
 use crate::album::Album;
 use crate::artist::Artist;
@@ -113,7 +114,7 @@ impl SearchView {
         _offset: usize,
         _append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.track(&query) {
+        if let Some(results) = block_on(spotify.track(&query)) {
             let t = vec![(&results).into()];
             let mut r = tracks.write().unwrap();
             *r = t;
@@ -129,7 +130,7 @@ impl SearchView {
         offset: usize,
         append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.search_track(&query, 50, offset as u32) {
+        if let Some(results) = block_on(spotify.search_track(&query, 50, offset as u32)) {
             let mut t = results.tracks.items.iter().map(|ft| ft.into()).collect();
             let mut r = tracks.write().unwrap();
 
@@ -150,7 +151,7 @@ impl SearchView {
         _offset: usize,
         _append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.album(&query) {
+        if let Some(results) = block_on(spotify.album(&query)) {
             let a = vec![(&results).into()];
             let mut r = albums.write().unwrap();
             *r = a;
@@ -166,7 +167,7 @@ impl SearchView {
         offset: usize,
         append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.search_album(&query, 50, offset as u32) {
+        if let Some(results) = block_on(spotify.search_album(&query, 50, offset as u32)) {
             let mut a = results.albums.items.iter().map(|sa| sa.into()).collect();
             let mut r = albums.write().unwrap();
 
@@ -187,7 +188,7 @@ impl SearchView {
         _offset: usize,
         _append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.artist(&query) {
+        if let Some(results) = block_on(spotify.artist(&query)) {
             let a = vec![(&results).into()];
             let mut r = artists.write().unwrap();
             *r = a;
@@ -203,7 +204,7 @@ impl SearchView {
         offset: usize,
         append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.search_artist(&query, 50, offset as u32) {
+        if let Some(results) = block_on(spotify.search_artist(&query, 50, offset as u32)) {
             let mut a = results.artists.items.iter().map(|fa| fa.into()).collect();
             let mut r = artists.write().unwrap();
 
@@ -224,7 +225,7 @@ impl SearchView {
         _offset: usize,
         _append: bool,
     ) -> u32 {
-        if let Some(result) = spotify.playlist(&query).as_ref() {
+        if let Some(result) = block_on(spotify.playlist(&query)).as_ref() {
             let pls = vec![result.into()];
             let mut r = playlists.write().unwrap();
             *r = pls;
@@ -240,7 +241,7 @@ impl SearchView {
         offset: usize,
         append: bool,
     ) -> u32 {
-        if let Some(results) = spotify.search_playlist(&query, 50, offset as u32) {
+        if let Some(results) = block_on(spotify.search_playlist(&query, 50, offset as u32)) {
             let mut pls = results.playlists.items.iter().map(|sp| sp.into()).collect();
             let mut r = playlists.write().unwrap();
 

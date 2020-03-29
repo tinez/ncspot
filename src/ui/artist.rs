@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 use std::thread;
+use futures::executor::block_on;
 
 use cursive::view::ViewWrapper;
 use cursive::Cursive;
@@ -40,7 +41,7 @@ impl ArtistView {
             let library = library.clone();
             thread::spawn(move || {
                 if let Some(id) = id {
-                    if let Some(tracks) = spotify.artist_top_tracks(id) {
+                    if let Some(tracks) = block_on(spotify.artist_top_tracks(id)) {
                         top_tracks.write().unwrap().extend(tracks);
                         library.trigger_redraw();
                     }
@@ -55,7 +56,7 @@ impl ArtistView {
             let library = library.clone();
             thread::spawn(move || {
                 if let Some(id) = id {
-                    if let Some(artists) = spotify.artist_related_artists(id) {
+                    if let Some(artists) = block_on(spotify.artist_related_artists(id)) {
                         related.write().unwrap().extend(artists);
                         library.trigger_redraw();
                     }

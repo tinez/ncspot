@@ -1,7 +1,8 @@
+use futures::executor::block_on;
 use std::fmt;
 use std::sync::Arc;
 
-use rspotify::spotify::model::artist::{FullArtist, SimplifiedArtist};
+use rspotify::model::artist::{FullArtist, SimplifiedArtist};
 
 use crate::album::Album;
 use crate::library::Library;
@@ -42,7 +43,7 @@ impl Artist {
         }
 
         if let Some(ref artist_id) = self.id {
-            if let Some(sas) = spotify.artist_albums(artist_id, 50, 0) {
+            if let Some(sas) = block_on(spotify.artist_albums(artist_id, 50, 0)) {
                 let mut albums: Vec<Album> = Vec::new();
 
                 for sa in sas.items {
@@ -51,7 +52,7 @@ impl Artist {
                     }
 
                     if let Some(album_id) = sa.id {
-                        if let Some(fa) = spotify.full_album(&album_id).as_ref() {
+                        if let Some(fa) = block_on(spotify.full_album(&album_id)).as_ref() {
                             albums.push(fa.into());
                         }
                     }

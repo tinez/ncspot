@@ -12,17 +12,15 @@ use librespot_playback::config::Bitrate;
 use librespot_playback::mixer::Mixer;
 use librespot_playback::player::Player;
 
-use rspotify::spotify::client::ApiError;
-use rspotify::spotify::client::Spotify as SpotifyAPI;
-use rspotify::spotify::model::album::{FullAlbum, SavedAlbum, SimplifiedAlbum};
-use rspotify::spotify::model::artist::FullArtist;
-use rspotify::spotify::model::page::{CursorBasedPage, Page};
-use rspotify::spotify::model::playlist::{FullPlaylist, PlaylistTrack, SimplifiedPlaylist};
-use rspotify::spotify::model::search::{
-    SearchAlbums, SearchArtists, SearchPlaylists, SearchTracks,
-};
-use rspotify::spotify::model::track::{FullTrack, SavedTrack};
-use rspotify::spotify::model::user::PrivateUser;
+use rspotify::client::ApiError;
+use rspotify::client::Spotify as SpotifyAPI;
+use rspotify::model::album::{FullAlbum, SavedAlbum, SimplifiedAlbum};
+use rspotify::model::artist::FullArtist;
+use rspotify::model::page::{CursorBasedPage, Page};
+use rspotify::model::playlist::{FullPlaylist, PlaylistTrack, SimplifiedPlaylist};
+use rspotify::model::search::{SearchAlbums, SearchArtists, SearchPlaylists, SearchTracks};
+use rspotify::model::track::{FullTrack, SavedTrack};
+use rspotify::model::user::PrivateUser;
 
 use failure::Error;
 
@@ -462,15 +460,16 @@ impl Spotify {
     }
 
     /// retries once when rate limits are hit
-    fn api_with_retry<F, R>(&self, cb: F) -> Option<R>
+    async fn api_with_retry<F, R, S>(&self, cb: F) -> Option<S>
     where
-        F: Fn(&SpotifyAPI) -> Result<R, Error>,
+        F: Fn(SpotifyAPI) -> R,
+        R: Future<Output = Result<S, Error>>,
     {
         let result = {
             let api = self.api.read().expect("can't read api");
-            cb(&api)
+            cb(api.clone())
         };
-        match result {
+        match result.await {
             Ok(v) => Some(v),
             Err(e) => {
                 debug!("api error: {:?}", e);
@@ -480,13 +479,13 @@ impl Spotify {
                             debug!("rate limit hit. waiting {:?} seconds", d);
                             thread::sleep(Duration::from_secs(d.unwrap_or(0) as u64));
                             let api = self.api.read().expect("can't read api");
-                            cb(&api).ok()
+                            cb(api.clone()).await.ok()
                         }
                         ApiError::Unauthorized => {
                             debug!("token unauthorized. trying refresh..");
                             self.refresh_token();
                             let api = self.api.read().expect("can't read api");
-                            cb(&api).ok()
+                            cb(api.clone()).await.ok()
                         }
                         e => {
                             error!("unhandled api error: {}", e);
@@ -500,19 +499,21 @@ impl Spotify {
         }
     }
 
-    pub fn append_tracks(
+    pub async fn append_tracks(
         &self,
         playlist_id: &str,
         tracks: &[String],
         position: Option<i32>,
     ) -> bool {
-        self.api_with_retry(|api| {
+        self.api_with_retry(|api| async move {
             api.user_playlist_add_tracks(&self.user, playlist_id, &tracks, position)
+                .await
         })
+        .await
         .is_some()
     }
 
-    pub fn overwrite_playlist(&self, id: &str, tracks: &[Track]) {
+    pub async fn overwrite_playlist(&self, id: &str, tracks: &[Track]) {
         // extract only track IDs
         let mut tracks: Vec<String> = tracks
             .iter()
@@ -527,8 +528,12 @@ impl Spotify {
             None
         };
 
-        if let Some(()) =
-            self.api_with_retry(|api| api.user_playlist_replace_tracks(&self.user, id, &tracks))
+        if let Some(()) = self
+            .api_with_retry(|api| async move {
+                api.user_playlist_replace_tracks(&self.user, id, &tracks)
+                    .await
+            })
+            .await
         {
             debug!("saved {} tracks to playlist {}", tracks.len(), id);
             while let Some(ref mut tracks) = remainder.clone() {
@@ -540,7 +545,7 @@ impl Spotify {
                 };
 
                 debug!("adding another {} tracks to playlist", tracks.len());
-                if self.append_tracks(id, tracks, None) {
+                if self.append_tracks(id, tracks, None).await {
                     debug!("{} tracks successfully added", tracks.len());
                 } else {
                     error!("error saving tracks to playlists {}", id);
@@ -552,146 +557,190 @@ impl Spotify {
         }
     }
 
-    pub fn delete_playlist(&self, id: &str) -> bool {
-        self.api_with_retry(|api| api.user_playlist_unfollow(&self.user, id))
+    pub async fn delete_playlist(&self, id: &str) -> bool {
+        self.api_with_retry(|api| async move { api.user_playlist_unfollow(&self.user, id).await })
+            .await
             .is_some()
     }
 
-    pub fn create_playlist(
+    pub async fn create_playlist(
         &self,
         name: &str,
         public: Option<bool>,
         description: Option<String>,
     ) -> Option<String> {
-        let result = self.api_with_retry(|api| {
+        let result = self.api_with_retry(|api| async move {
             api.user_playlist_create(&self.user, name, public, description.clone())
+                .await
         });
-        result.map(|r| r.id)
+        result.await.map(|r| r.id)
     }
 
-    pub fn album(&self, album_id: &str) -> Option<FullAlbum> {
-        self.api_with_retry(|api| api.album(album_id))
+    pub async fn album(&self, album_id: &str) -> Option<FullAlbum> {
+        self.api_with_retry(|api| async move { api.album(album_id).await })
+            .await
     }
 
-    pub fn artist(&self, artist_id: &str) -> Option<FullArtist> {
-        self.api_with_retry(|api| api.artist(artist_id))
+    pub async fn artist(&self, artist_id: &str) -> Option<FullArtist> {
+        self.api_with_retry(|api| async move { api.artist(artist_id).await })
+            .await
     }
 
-    pub fn playlist(&self, playlist_id: &str) -> Option<FullPlaylist> {
-        self.api_with_retry(|api| api.playlist(playlist_id, None, None))
+    pub async fn playlist(&self, playlist_id: &str) -> Option<FullPlaylist> {
+        self.api_with_retry(|api| async move { api.playlist(playlist_id, None, None).await })
+            .await
     }
 
-    pub fn track(&self, track_id: &str) -> Option<FullTrack> {
-        self.api_with_retry(|api| api.track(track_id))
+    pub async fn track(&self, track_id: &str) -> Option<FullTrack> {
+        self.api_with_retry(|api| async move { api.track(track_id).await })
+            .await
     }
 
-    pub fn search_track(&self, query: &str, limit: u32, offset: u32) -> Option<SearchTracks> {
-        self.api_with_retry(|api| api.search_track(query, limit, offset, None))
+    pub async fn search_track(&self, query: &str, limit: u32, offset: u32) -> Option<SearchTracks> {
+        self.api_with_retry(|api| async move { api.search_track(query, limit, offset, None).await })
+            .await
     }
 
-    pub fn search_album(&self, query: &str, limit: u32, offset: u32) -> Option<SearchAlbums> {
-        self.api_with_retry(|api| api.search_album(query, limit, offset, None))
+    pub async fn search_album(&self, query: &str, limit: u32, offset: u32) -> Option<SearchAlbums> {
+        self.api_with_retry(|api| async move { api.search_album(query, limit, offset, None).await })
+            .await
     }
 
-    pub fn search_artist(&self, query: &str, limit: u32, offset: u32) -> Option<SearchArtists> {
-        self.api_with_retry(|api| api.search_artist(query, limit, offset, None))
+    pub async fn search_artist(
+        &self,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Option<SearchArtists> {
+        self.api_with_retry(|api| async move { api.search_artist(query, limit, offset, None).await })
+            .await
     }
 
-    pub fn search_playlist(&self, query: &str, limit: u32, offset: u32) -> Option<SearchPlaylists> {
-        self.api_with_retry(|api| api.search_playlist(query, limit, offset, None))
+    pub async fn search_playlist(
+        &self,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Option<SearchPlaylists> {
+        self.api_with_retry(|api| async move { api.search_playlist(query, limit, offset, None).await })
+            .await
     }
 
-    pub fn current_user_playlist(
+    pub async fn current_user_playlist(
         &self,
         limit: u32,
         offset: u32,
     ) -> Option<Page<SimplifiedPlaylist>> {
-        self.api_with_retry(|api| api.current_user_playlists(limit, offset))
+        self.api_with_retry(|api| async move { api.current_user_playlists(limit, offset).await })
+            .await
     }
 
-    pub fn user_playlist_tracks(
+    pub async fn user_playlist_tracks(
         &self,
         playlist_id: &str,
         limit: u32,
         offset: u32,
     ) -> Option<Page<PlaylistTrack>> {
         let user = self.user.clone();
-        self.api_with_retry(|api| {
+        self.api_with_retry(|api| async move {
             api.user_playlist_tracks(&user, playlist_id, None, limit, offset, None)
+                .await
         })
+        .await
     }
 
-    pub fn full_album(&self, album_id: &str) -> Option<FullAlbum> {
-        self.api_with_retry(|api| api.album(album_id))
+    pub async fn full_album(&self, album_id: &str) -> Option<FullAlbum> {
+        self.api_with_retry(|api| async move { api.album(album_id).await })
+            .await
     }
 
-    pub fn artist_albums(
+    pub async fn artist_albums(
         &self,
         artist_id: &str,
         limit: u32,
         offset: u32,
     ) -> Option<Page<SimplifiedAlbum>> {
-        self.api_with_retry(|api| {
+        self.api_with_retry(|api| async move {
             api.artist_albums(artist_id, None, None, Some(limit), Some(offset))
+                .await
         })
+        .await
     }
 
-    pub fn current_user_followed_artists(
+    pub async fn current_user_followed_artists(
         &self,
         last: Option<String>,
     ) -> Option<CursorBasedPage<FullArtist>> {
-        self.api_with_retry(|api| api.current_user_followed_artists(50, last.clone()))
-            .map(|cp| cp.artists)
+        self.api_with_retry(|api| async move {
+            api.current_user_followed_artists(50, last.clone()).await
+        })
+        .await
+        .map(|cp| cp.artists)
     }
 
-    pub fn user_follow_artists(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.user_follow_artists(&ids))
+    pub async fn user_follow_artists(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.user_follow_artists(&ids).await })
+            .await
     }
 
-    pub fn user_unfollow_artists(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.user_unfollow_artists(&ids))
+    pub async fn user_unfollow_artists(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.user_unfollow_artists(&ids).await })
+            .await
     }
 
-    pub fn current_user_saved_albums(&self, offset: u32) -> Option<Page<SavedAlbum>> {
-        self.api_with_retry(|api| api.current_user_saved_albums(50, offset))
+    pub async fn current_user_saved_albums(&self, offset: u32) -> Option<Page<SavedAlbum>> {
+        self.api_with_retry(|api| async move { api.current_user_saved_albums(50, offset).await })
+            .await
     }
 
-    pub fn current_user_saved_albums_add(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.current_user_saved_albums_add(&ids))
+    pub async fn current_user_saved_albums_add(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.current_user_saved_albums_add(&ids).await })
+            .await
     }
 
-    pub fn current_user_saved_albums_delete(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.current_user_saved_albums_delete(&ids))
+    pub async fn current_user_saved_albums_delete(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.current_user_saved_albums_delete(&ids).await })
+            .await
     }
 
-    pub fn current_user_saved_tracks(&self, offset: u32) -> Option<Page<SavedTrack>> {
-        self.api_with_retry(|api| api.current_user_saved_tracks(50, offset))
+    pub async fn current_user_saved_tracks(&self, offset: u32) -> Option<Page<SavedTrack>> {
+        self.api_with_retry(|api| async move { api.current_user_saved_tracks(50, offset).await })
+            .await
     }
 
-    pub fn current_user_saved_tracks_add(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.current_user_saved_tracks_add(&ids))
+    pub async fn current_user_saved_tracks_add(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.current_user_saved_tracks_add(&ids).await })
+            .await
     }
 
-    pub fn current_user_saved_tracks_delete(&self, ids: Vec<String>) -> Option<()> {
-        self.api_with_retry(|api| api.current_user_saved_tracks_delete(&ids))
+    pub async fn current_user_saved_tracks_delete(&self, ids: Vec<String>) -> Option<()> {
+        self.api_with_retry(|api| async move { api.current_user_saved_tracks_delete(&ids).await })
+            .await
     }
 
-    pub fn user_playlist_follow_playlist(&self, owner_id: String, id: String) -> Option<()> {
-        self.api_with_retry(|api| api.user_playlist_follow_playlist(&owner_id, &id, true))
+    pub async fn user_playlist_follow_playlist(&self, owner_id: String, id: String) -> Option<()> {
+        self.api_with_retry(|api| async move {
+            api.user_playlist_follow_playlist(&owner_id, &id, true)
+                .await
+        })
+        .await
     }
 
-    pub fn artist_top_tracks(&self, id: String) -> Option<Vec<Track>> {
-        self.api_with_retry(|api| api.artist_top_tracks(&id, None))
+    pub async fn artist_top_tracks(&self, id: String) -> Option<Vec<Track>> {
+        self.api_with_retry(|api| async move { api.artist_top_tracks(&id, None).await })
+            .await
             .map(|ft| ft.tracks.iter().map(|t| t.into()).collect())
     }
 
-    pub fn artist_related_artists(&self, id: String) -> Option<Vec<Artist>> {
-        self.api_with_retry(|api| api.artist_related_artists(&id))
+    pub async fn artist_related_artists(&self, id: String) -> Option<Vec<Artist>> {
+        self.api_with_retry(|api| async move { api.artist_related_artists(&id).await })
+            .await
             .map(|fa| fa.artists.iter().map(|a| a.into()).collect())
     }
 
-    pub fn current_user(&self) -> Option<PrivateUser> {
-        self.api_with_retry(|api| api.current_user())
+    pub async fn current_user(&self) -> Option<PrivateUser> {
+        self.api_with_retry(|api| async move { api.current_user().await })
+            .await
     }
 
     pub fn load(&self, track: &Track) {
