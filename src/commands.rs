@@ -268,6 +268,8 @@ impl CommandManager {
         kb.insert("Right".into(), Command::Move(MoveMode::Right, None));
         kb.insert("PageUp".into(), Command::Move(MoveMode::Up, Some(5)));
         kb.insert("PageDown".into(), Command::Move(MoveMode::Down, Some(5)));
+        kb.insert("Home".into(), Command::Move(MoveMode::Up, Some(i32::max_value())));
+        kb.insert("End".into(), Command::Move(MoveMode::Down, Some(i32::max_value())));
         kb.insert("k".into(), Command::Move(MoveMode::Up, None));
         kb.insert("j".into(), Command::Move(MoveMode::Down, None));
         kb.insert("h".into(), Command::Move(MoveMode::Left, None));
